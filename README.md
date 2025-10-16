@@ -1,5 +1,18 @@
 # 微信多开脚本说明
 
+## 启动命令
+
+1个分身
+```shell
+sudo bash wechat_multi_open_v3.sh
+```
+
+多个分身：n 替换成你要的数字
+
+```shell
+sudo bash wechat_multi_open_v3.sh n
+```
+
 ## 核心原理
 
 macOS 微信使用 **沙盒机制（Sandbox）** 存储数据，数据存储路径由 **Bundle Identifier** 决定。
