@@ -1,20 +1,21 @@
 #!/bin/bash
 
 ###############################################################################
-# macOS 微信多开脚本 v3.0
+# macOS 微信多开脚本 - 最终版
 # 适用于微信 4.0 及以上版本
 # 
 # 功能：
 # 1. 支持创建多个微信分身应用（2个、3个、4个...）
 # 2. 自动修改 Bundle Identifier
-# 3. 重新签名应用
-# 4. 启动指定的微信实例
-# 5. 数据安全保护：重新创建应用不会丢失数据
+# 3. 移除隔离属性（解决图标禁用问题）
+# 4. 重新签名应用
+# 5. 启动指定的微信实例
+# 6. 数据安全保护：重新创建应用不会丢失数据
 #
 # 使用方法：
-#   sudo bash wechat_multi_open_v3.sh [数量]
-#   sudo bash wechat_multi_open_v3.sh 3      # 创建3个微信（原版+2个分身）
-#   sudo bash wechat_multi_open_v3.sh        # 默认创建2个微信（原版+1个分身）
+#   sudo bash wechat_multi_open_final.sh [数量]
+#   sudo bash wechat_multi_open_final.sh 3      # 创建3个微信（原版+2个分身）
+#   sudo bash wechat_multi_open_final.sh        # 默认创建2个微信（原版+1个分身）
 #
 # 注意事项：
 # - 需要 sudo 权限执行
@@ -194,7 +195,7 @@ create_wechat_clone() {
     fi
     
     # 1. 复制应用
-    print_info "  [1/4] 复制应用..."
+    print_info "  [1/5] 复制应用..."
     cp -R "$WECHAT_APP" "$wechat_clone"
     
     if [ ! -d "$wechat_clone" ]; then
@@ -202,8 +203,17 @@ create_wechat_clone() {
         return 1
     fi
     
-    # 2. 修改 Bundle Identifier
-    print_info "  [2/4] 修改 Bundle Identifier 为 $bundle_id"
+    # 2. 移除隔离属性（解决图标禁用问题）
+    print_info "  [2/5] 移除隔离属性..."
+    xattr -cr "$wechat_clone" 2>/dev/null || true
+    
+    # 验证隔离属性是否已移除
+    if xattr "$wechat_clone" 2>/dev/null | grep -q "com.apple.quarantine"; then
+        print_warning "  隔离属性可能未完全移除，但不影响使用"
+    fi
+    
+    # 3. 修改 Bundle Identifier
+    print_info "  [3/5] 修改 Bundle Identifier 为 $bundle_id"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$plist_file"
     
     # 验证修改
@@ -213,8 +223,8 @@ create_wechat_clone() {
         return 1
     fi
     
-    # 3. 重新签名
-    print_info "  [3/4] 重新签名应用..."
+    # 4. 重新签名
+    print_info "  [4/5] 重新签名应用..."
     codesign --force --deep --sign - "$wechat_clone" 2>&1 | grep -v "replacing existing signature" || true
     
     if [ $? -ne 0 ] && [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -222,8 +232,8 @@ create_wechat_clone() {
         return 1
     fi
     
-    # 4. 启动应用
-    print_info "  [4/4] 启动微信实例..."
+    # 5. 启动应用
+    print_info "  [5/5] 启动微信实例..."
     nohup "$exec_file" >/dev/null 2>&1 &
     
     sleep 1
@@ -266,35 +276,24 @@ create_all_clones() {
 # 显示数据文件夹信息
 show_data_info() {
     echo ""
-    print_step "数据文件夹信息"
+    print_step "微信分身数据文件夹信息"
     echo ""
     
-    echo "微信数据存储在以下位置（按 Bundle Identifier 区分）："
+    echo "微信分身数据存储在以下位置（按 Bundle Identifier 区分）："
     echo ""
     
-    # 原版微信
-    local original_data="${DATA_BASE_PATH}/${BASE_BUNDLE_ID}"
-    if [ -d "$original_data" ]; then
-        local size=$(du -sh "$original_data" 2>/dev/null | cut -f1)
-        echo "  1. WeChat.app"
-        echo "     Bundle ID: ${BASE_BUNDLE_ID}"
-        echo "     数据路径: ~/Library/Containers/${BASE_BUNDLE_ID}/"
-        echo "     数据大小: $size"
-        echo ""
-    fi
-    
-    # 分身微信
+    # 只显示分身微信，不显示原版
     for i in $(seq 2 $TOTAL_COUNT); do
         local data_path="${DATA_BASE_PATH}/${BASE_BUNDLE_ID}${i}"
         if [ -d "$data_path" ]; then
             local size=$(du -sh "$data_path" 2>/dev/null | cut -f1)
-            echo "  $i. WeChat${i}.app"
+            echo "  $((i-1)). WeChat${i}.app"
             echo "     Bundle ID: ${BASE_BUNDLE_ID}${i}"
             echo "     数据路径: ~/Library/Containers/${BASE_BUNDLE_ID}${i}/"
             echo "     数据大小: $size"
             echo ""
         else
-            echo "  $i. WeChat${i}.app"
+            echo "  $((i-1)). WeChat${i}.app"
             echo "     Bundle ID: ${BASE_BUNDLE_ID}${i}"
             echo "     数据路径: ~/Library/Containers/${BASE_BUNDLE_ID}${i}/"
             echo "     数据大小: 尚未创建（首次登录后生成）"
@@ -310,14 +309,13 @@ show_summary() {
     echo "     创建完成！"
     echo "================================================"
     echo ""
-    print_info "当前系统中的微信实例："
+    print_info "已创建的微信分身："
     echo ""
-    echo "  1. WeChat.app (原版)"
     
     for i in $(seq 2 $TOTAL_COUNT); do
         local wechat_clone="/Applications/WeChat${i}.app"
         if [ -d "$wechat_clone" ]; then
-            echo "  $i. WeChat${i}.app (分身)"
+            echo "  $((i-1)). WeChat${i}.app"
         fi
     done
     
@@ -325,12 +323,12 @@ show_summary() {
     
     echo ""
     print_info "重要说明："
-    echo "  1. 所有微信实例已在后台启动"
+    echo "  1. 所有微信分身已在后台启动"
     echo "  2. 可以在 Dock 或启动台中找到它们"
-    echo "  3. 每个实例可以登录不同的账号"
-    echo "  4. 微信升级后需要重新运行此脚本"
-    echo "  5. 重新运行不会丢失数据（数据和应用是分离的）"
-    echo "  6. 删除应用程序不会删除数据文件夹"
+    echo "  3. 图标应该正常显示（无禁用标志）"
+    echo "  4. 每个分身可以登录不同的账号"
+    echo "  5. 微信升级后需要重新运行此脚本"
+    echo "  6. 重新运行不会丢失数据（数据和应用是分离的）"
     echo ""
     
     print_info "如需删除某个分身："
@@ -343,7 +341,7 @@ show_summary() {
 main() {
     echo ""
     echo "================================================"
-    echo "     macOS 微信多开自动化脚本 v3.0"
+    echo "     macOS 微信多开自动化脚本 - 最终版"
     echo "================================================"
     echo ""
     
@@ -356,6 +354,33 @@ main() {
     show_summary
 }
 
+# 显示重启提醒
+show_reboot_reminder() {
+    echo ""
+    echo "================================================"
+    echo "     ⚠️  重要提醒  ⚠️"
+    echo "================================================"
+    echo ""
+    print_warning "为确保双击应用能正确打开对应的微信实例，请执行以下操作之一："
+    echo ""
+    echo "  方案 1：重启电脑（推荐）"
+    echo "    sudo reboot"
+    echo ""
+    echo "  方案 2：重建 Launch Services 数据库"
+    echo "    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user && killall Dock"
+    echo ""
+    print_info "说明："
+    echo "  • 不执行上述操作，双击 WeChat2.app 可能会打开原版微信"
+    echo "  • 重启电脑是最简单且无副作用的方案"
+    echo "  • 重建 Launch Services 可能需要重新设置部分文件关联"
+    echo ""
+    echo "================================================"
+    echo ""
+}
+
 # 执行主函数
 main "$@"
+
+# 显示重启提醒
+show_reboot_reminder
 
