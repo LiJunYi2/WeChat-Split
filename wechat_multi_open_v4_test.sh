@@ -16,11 +16,11 @@
 # 8. 修复网络连接问题
 #
 # 使用方法：
-#   sudo bash wechat_multi_open_v2.sh [数量]
-#   sudo bash wechat_multi_open_v2.sh 3      # 创建3个微信（原版+2个分身）
-#   sudo bash wechat_multi_open_v2.sh        # 默认创建2个微信（原版+1个分身）
-#   sudo bash wechat_multi_open_v2.sh clean  # 清理所有分身（保留数据）
-#   sudo bash wechat_multi_open_v2.sh remove # 删除所有分身和数据
+#   sudo bash wechat_multi_open_v4_test.sh [数量]
+#   sudo bash wechat_multi_open_v4_test.sh 3      # 创建3个微信（原版+2个分身）
+#   sudo bash wechat_multi_open_v4_test.sh        # 默认创建2个微信（原版+1个分身）
+#   sudo bash wechat_multi_open_v4_test.sh clean  # 清理所有分身（保留数据）
+#   sudo bash wechat_multi_open_v4_test.sh remove # 删除所有分身和数据
 #
 # 注意事项：
 # - 需要 sudo 权限执行
