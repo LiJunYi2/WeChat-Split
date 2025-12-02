@@ -2,7 +2,7 @@
 
 ###############################################################################
 # macOS 微信多开脚本
-# 针对：https://github.com/LiJunYi2/WeChat-Split/issues/3 的测试脚本
+# 修复：https://github.com/LiJunYi2/WeChat-Split/issues/3 ，重启电脑后，分身网络问题
 # 适用于微信 4.0 及以上版本
 # 
 # 功能：
