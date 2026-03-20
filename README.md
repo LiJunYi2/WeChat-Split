@@ -8,13 +8,13 @@ Mac 端，微信 4.0 以上版本！！
 
 1个分身
 ```shell
-sudo bash wechat_multi_open_v3.sh
+sudo bash wechat_multi_open_v4_20251202.sh
 ```
 
 多个分身：n 替换成你要的数字
 
 ```shell
-sudo bash wechat_multi_open_v3.sh n
+sudo bash wechat_multi_open_v4_20251202.sh n
 ```
 
 ## 核心原理
