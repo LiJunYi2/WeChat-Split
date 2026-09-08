@@ -16,11 +16,18 @@
 # 8. 修复网络连接问题
 #
 # 使用方法：
-#   sudo bash wechat_multi_open_v4_20251202.sh [数量]
-#   sudo bash wechat_multi_open_v4_20251202.sh 3      # 创建3个微信（原版+2个分身）
+#   sudo bash wechat_multi_open_v4_20251202.sh [数量] [名字列表]
+#   sudo bash wechat_multi_open_v4_20251202.sh 3      # 创建3个微信（原版+2个分身，默认名 WeChat2/WeChat3）
+#   sudo bash wechat_multi_open_v4_20251202.sh 3 "工作,生活"  # 自定义分身显示名
+#   sudo bash wechat_multi_open_v4_20251202.sh --names "微信-工作,微信-生活" # 自动推断数量
 #   sudo bash wechat_multi_open_v4_20251202.sh        # 默认创建2个微信（原版+1个分身）
 #   sudo bash wechat_multi_open_v4_20251202.sh clean  # 清理所有分身（保留数据）
 #   sudo bash wechat_multi_open_v4_20251202.sh remove # 删除所有分身和数据
+#
+# 自定义名字说明：
+# - 第二参数或 --names/-n 为逗号分隔的显示名列表，数量需等于 分身数(总数-1)
+# - 默认名仍为 WeChat2/WeChat3...，传参后将覆盖 CFBundleDisplayName/CFBundleName 及 zh-Hans/zh-Hant/en 本地化
+# - 修复 BUG：旧版仅改 Info.plist，中文系统下 Spotlight/Finder 仍显示“微信”，2.1 起同步修复 InfoPlist.strings
 #
 # 注意事项：
 # - 需要 sudo 权限执行
@@ -43,7 +50,9 @@ NC='\033[0m' # No Color
 WECHAT_APP="/Applications/WeChat.app"
 BASE_BUNDLE_ID="com.tencent.xinWeChat"
 DATA_BASE_PATH="$HOME/Library/Containers"
-SCRIPT_VERSION="2.0"
+SCRIPT_VERSION="2.1"
+# 分身显示名列表（全局数组，索引0对应 WeChat2）
+declare -a CLONE_DISPLAY_NAMES=()
 
 # 打印带颜色的消息
 print_info() {
@@ -73,20 +82,33 @@ print_success() {
 # 显示使用帮助
 show_help() {
     echo "使用方法："
-    echo "  sudo bash $0 [命令/数量]"
+    echo "  sudo bash $0 [数量] [名字列表]"
+    echo "  sudo bash $0 [选项]"
     echo ""
     echo "命令："
-    echo "  数字    - 创建指定数量的微信（包括原版），默认为 2"
-    echo "  clean   - 清理所有分身应用（保留数据）"
-    echo "  remove  - 删除所有分身应用和数据（危险操作）"
-    echo "  fix     - 修复网络连接问题"
-    echo "  help    - 显示此帮助信息"
+    echo "  数字              - 创建指定数量的微信（包括原版），默认为 2"
+    echo "  clean             - 清理所有分身应用（保留数据）"
+    echo "  remove            - 删除所有分身应用和数据（危险操作）"
+    echo "  fix               - 修复网络连接问题"
+    echo "  help              - 显示此帮助信息"
+    echo ""
+    echo "选项："
+    echo "  -n, --names \"名1,名2\" - 逗号分隔的自定义显示名（分身数=总数-1）"
+    echo "  -c, --count 数字     - 等同于直接传数字，指定总数"
     echo ""
     echo "示例："
-    echo "  sudo bash $0        # 创建 2 个微信（原版 + 1 个分身）"
-    echo "  sudo bash $0 3      # 创建 3 个微信（原版 + 2 个分身）"
-    echo "  sudo bash $0 clean  # 清理所有分身应用"
-    echo "  sudo bash $0 fix    # 修复网络问题"
+    echo "  sudo bash $0                          # 创建 2 个微信（WeChat + WeChat2）"
+    echo "  sudo bash $0 3                        # 创建 3 个微信（WeChat2, WeChat3）"
+    echo "  sudo bash $0 3 \"工作,生活\"           # 创建 3 个，显示名为 工作/生活"
+    echo "  sudo bash $0 3 \"微信-工作,微信-生活\" # 同上，支持中文/英文任意"
+    echo "  sudo bash $0 --names \"A,B,C\"        # 自动推断总数为 4（1+3）"
+    echo "  sudo bash $0 4 -n \"A,B,C\"           # 显式指定总数 + 自定义名"
+    echo "  sudo bash $0 clean                    # 清理所有分身应用"
+    echo "  sudo bash $0 fix                      # 修复网络问题"
+    echo ""
+    echo "说明："
+    echo "  未传名字时默认 WeChat2/3/...；传入数量少于分身数时剩余用默认值补齐"
+    echo "  传入多于分身数时多余忽略并警告"
     echo ""
 }
 
@@ -141,36 +163,101 @@ check_and_fix_network() {
 
 # 解析命令行参数
 parse_arguments() {
-    local arg=${1:-2}
-    
-    # 处理特殊命令
-    case "$arg" in
-        help|--help|-h)
-            show_help
-            exit 0
-            ;;
-        clean)
-            MODE="clean"
-            return
-            ;;
-        remove)
-            MODE="remove"
-            return
-            ;;
-        fix)
-            MODE="fix"
-            return
-            ;;
-        *)
-            MODE="create"
-            ;;
-    esac
-    
-    # 验证数字参数
-    TOTAL_COUNT=$arg
-    
+    MODE="create"
+    TOTAL_COUNT=""
+    CUSTOM_NAMES_RAW=""
+    CLONE_DISPLAY_NAMES=()
+    local COUNT_SET=false
+
+    if [ $# -eq 0 ]; then
+        TOTAL_COUNT=2
+    else
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                help|--help|-h)
+                    show_help
+                    exit 0
+                    ;;
+                clean)
+                    MODE="clean"
+                    shift
+                    if [[ $# -gt 0 ]]; then print_warning "clean 模式忽略多余参数: $*"; fi
+                    return
+                    ;;
+                remove)
+                    MODE="remove"
+                    shift
+                    if [[ $# -gt 0 ]]; then print_warning "remove 模式忽略多余参数: $*"; fi
+                    return
+                    ;;
+                fix)
+                    MODE="fix"
+                    shift
+                    if [[ $# -gt 0 ]]; then print_warning "fix 模式忽略多余参数: $*"; fi
+                    return
+                    ;;
+                -n|--names)
+                    if [[ -z "$2" ]]; then print_error "--names 需要参数"; show_help; exit 1; fi
+                    CUSTOM_NAMES_RAW="$2"
+                    shift 2
+                    ;;
+                --names=*)
+                    CUSTOM_NAMES_RAW="${1#*=}"
+                    shift
+                    ;;
+                -c|--count)
+                    if [[ -z "$2" ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then print_error "--count 需要数字参数"; show_help; exit 1; fi
+                    TOTAL_COUNT="$2"
+                    COUNT_SET=true
+                    shift 2
+                    ;;
+                --count=*)
+                    TOTAL_COUNT="${1#*=}"
+                    if ! [[ "$TOTAL_COUNT" =~ ^[0-9]+$ ]]; then print_error "--count 需要数字"; show_help; exit 1; fi
+                    COUNT_SET=true
+                    shift
+                    ;;
+                *)
+                    if [[ "$1" =~ ^[0-9]+$ ]] && [ "$COUNT_SET" = false ] && [ -z "$TOTAL_COUNT" ]; then
+                        TOTAL_COUNT="$1"
+                        COUNT_SET=true
+                        shift
+                    elif [[ "$1" == *","* ]] || [[ ! "$1" =~ ^[0-9]+$ ]]; then
+                        if [ -n "$CUSTOM_NAMES_RAW" ]; then
+                            print_error "重复的自定义名字参数: $1"
+                            show_help
+                            exit 1
+                        fi
+                        CUSTOM_NAMES_RAW="$1"
+                        shift
+                    else
+                        print_error "未知或多余参数: $1"
+                        show_help
+                        exit 1
+                    fi
+                    ;;
+            esac
+        done
+    fi
+
+    if [ "$MODE" != "create" ]; then
+        return
+    fi
+
+    # 未指定数量时按名字数推断
+    if [ -z "$TOTAL_COUNT" ]; then
+        if [ -n "$CUSTOM_NAMES_RAW" ]; then
+            local _tmp_count=$(echo "$CUSTOM_NAMES_RAW" | awk -F',' '{print NF}')
+            TOTAL_COUNT=$((_tmp_count + 1))
+            COUNT_SET=true
+            print_info "未指定数量，按名字数自动推断总数为 $TOTAL_COUNT"
+        else
+            TOTAL_COUNT=2
+        fi
+    fi
+
     if ! [[ "$TOTAL_COUNT" =~ ^[0-9]+$ ]]; then
-        print_error "参数必须是数字"
+        print_error "数量参数必须是数字"
         show_help
         exit 1
     fi
@@ -191,8 +278,34 @@ parse_arguments() {
     fi
     
     CLONE_COUNT=$((TOTAL_COUNT - 1))  # 需要创建的分身数量
+
+    # 解析自定义名字为数组
+    if [ -n "$CUSTOM_NAMES_RAW" ]; then
+        CUSTOM_NAMES_RAW=$(echo "$CUSTOM_NAMES_RAW" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+        IFS=',' read -ra RAW_NAMES <<< "$CUSTOM_NAMES_RAW"
+        for name in "${RAW_NAMES[@]}"; do
+            name=$(echo "$name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            name=$(echo "$name" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+            if [ -n "$name" ]; then
+                CLONE_DISPLAY_NAMES+=("$name")
+            fi
+        done
+        local expected=$CLONE_COUNT
+        local provided=${#CLONE_DISPLAY_NAMES[@]}
+        if [ "$provided" -lt "$expected" ]; then
+            print_warning "自定义名字数量($provided)少于分身数($expected)，剩余将使用默认名 WeChatX 补齐"
+        elif [ "$provided" -gt "$expected" ]; then
+            print_warning "自定义名字数量($provided)多于分身数($expected)，多余的将被忽略"
+            CLONE_DISPLAY_NAMES=("${CLONE_DISPLAY_NAMES[@]:0:$expected}")
+        fi
+        print_info "自定义显示名: ${CLONE_DISPLAY_NAMES[*]:-(无，使用默认)}"
+    fi
     
-    print_info "将创建 $TOTAL_COUNT 个微信实例（原版 + $CLONE_COUNT 个分身）"
+    if [ ${#CLONE_DISPLAY_NAMES[@]} -eq 0 ]; then
+        print_info "将创建 $TOTAL_COUNT 个微信实例（原版 + $CLONE_COUNT 个分身），默认名 WeChat2...WeChat${TOTAL_COUNT}"
+    else
+        print_info "将创建 $TOTAL_COUNT 个微信实例（原版 + $CLONE_COUNT 个分身）"
+    fi
 }
 
 # 检查数据文件夹是否存在
@@ -327,16 +440,28 @@ remove_wechat_clone_data() {
     fi
 }
 
-# 创建单个微信分身（改进版）
+# 创建单个微信分身（改进版，支持自定义显示名 + 修复本地化）
 create_wechat_clone() {
     local index=$1
+    local custom_name="$2"
     local wechat_clone="/Applications/WeChat${index}.app"
     local bundle_id="${BASE_BUNDLE_ID}${index}"
     local plist_file="${wechat_clone}/Contents/Info.plist"
     local exec_file="${wechat_clone}/Contents/MacOS/WeChat"
     local data_path="${DATA_BASE_PATH}/${bundle_id}"
+    # 确定最终显示名：优先用传入的 $2，否则从全局数组取，否则默认 WeChat${index}
+    local display_name="$custom_name"
+    if [ -z "$display_name" ] && [ ${#CLONE_DISPLAY_NAMES[@]} -ge $((index-1)) ]; then
+        local arr_idx=$((index-2))
+        if [ -n "${CLONE_DISPLAY_NAMES[$arr_idx]}" ]; then
+            display_name="${CLONE_DISPLAY_NAMES[$arr_idx]}"
+        fi
+    fi
+    if [ -z "$display_name" ]; then
+        display_name="WeChat${index}"
+    fi
     
-    print_step "创建第 $index 个微信分身..."
+    print_step "创建第 $index 个微信分身 (显示名: $display_name)..."
     
     # 检查是否有现有数据
     if [ -d "$data_path" ]; then
@@ -345,7 +470,7 @@ create_wechat_clone() {
     fi
     
     # 1. 复制应用
-    print_info "  [1/8] 复制应用..."
+    print_info "  [1/9] 复制应用..."
     cp -R "$WECHAT_APP" "$wechat_clone"
     
     if [ ! -d "$wechat_clone" ]; then
@@ -354,23 +479,48 @@ create_wechat_clone() {
     fi
     
     # 2. 移除所有扩展属性（解决图标禁用问题）
-    print_info "  [2/8] 移除扩展属性..."
+    print_info "  [2/9] 移除扩展属性..."
     xattr -cr "$wechat_clone" 2>/dev/null || true
     
     # 3. 修改 Bundle Identifier
-    print_info "  [3/8] 修改 Bundle Identifier 为 $bundle_id"
+    print_info "  [3/9] 修改 Bundle Identifier 为 $bundle_id"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$plist_file"
     
-    # 4. 修改应用名称（避免冲突）
-    /usr/libexec/PlistBuddy -c "Set :CFBundleName WeChat${index}" "$plist_file" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName WeChat${index}" "$plist_file" 2>/dev/null || true
+    # 4. 修改应用名称（避免冲突，支持自定义）
+    print_info "  [4/9] 修改显示名称为 $display_name"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName $display_name" "$plist_file" 2>/dev/null || true
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $display_name" "$plist_file" 2>/dev/null || true
+    
+    # 4.1 修复本地化显示（解决 Spotlight/Finder 仍显示“微信”问题）
+    print_info "  [5/9] 修复本地化显示..."
+    for lang in zh-Hans zh-Hant en; do
+        local strings_file="${wechat_clone}/Contents/Resources/${lang}.lproj/InfoPlist.strings"
+        if [ -f "$strings_file" ]; then
+            local tmp_utf8="/tmp/wechat_${index}_${lang}_utf8.txt"
+            local tmp_utf8_new="/tmp/wechat_${index}_${lang}_new.txt"
+            if iconv -f UTF-16 -t UTF-8 "$strings_file" > "$tmp_utf8" 2>/dev/null; then
+                local esc_name=$(printf '%s' "$display_name" | sed 's/[&\/\\]/\\&/g; s/"/\\"/g')
+                sed -e "s/\"CFBundleDisplayName\"[[:space:]]*=[[:space:]]*\".*\";/\"CFBundleDisplayName\" = \"$esc_name\";/" \
+                    -e "s/\"CFBundleName\"[[:space:]]*=[[:space:]]*\".*\";/\"CFBundleName\" = \"$esc_name\";/" \
+                    "$tmp_utf8" > "$tmp_utf8_new"
+                if iconv -f UTF-8 -t UTF-16 "$tmp_utf8_new" > "$strings_file" 2>/dev/null; then
+                    print_info "    已更新 $lang.lproj 显示名为: $display_name"
+                else
+                    print_warning "    $lang.lproj 转换回 UTF-16 失败，保留原文件"
+                fi
+                rm -f "$tmp_utf8" "$tmp_utf8_new"
+            else
+                print_warning "    无法读取 $lang.lproj/InfoPlist.strings，跳过"
+            fi
+        fi
+    done
     
     # 5. 清理旧的代码签名
-    print_info "  [4/8] 清理旧签名..."
+    print_info "  [6/9] 清理旧签名..."
     codesign --remove-signature "$wechat_clone" 2>/dev/null || true
     
     # 6. 创建 entitlements 文件（包含网络权限）
-    print_info "  [5/8] 配置权限..."
+    print_info "  [7/9] 配置权限..."
     local entitlements_file="/tmp/wechat_entitlements_${index}.plist"
     cat > "$entitlements_file" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -398,21 +548,21 @@ create_wechat_clone() {
 EOF
     
     # 7. 重新签名（使用 entitlements）
-    print_info "  [6/8] 重新签名应用..."
+    print_info "  [8/9] 重新签名应用..."
     codesign --force --deep --sign - --entitlements "$entitlements_file" "$wechat_clone" 2>&1 | grep -v "replacing existing signature" || true
     
     # 清理临时文件
     rm -f "$entitlements_file"
     
     # 8. 设置正确的权限
-    print_info "  [7/8] 设置权限..."
+    print_info "  [9/9] 设置权限..."
     chmod -R 755 "$wechat_clone"
     
     # 9. 注册到 Launch Services
-    print_info "  [8/8] 注册应用..."
+    print_info "  注册应用..."
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$wechat_clone" 2>/dev/null || true
     
-    print_success "WeChat${index}.app 创建成功"
+    print_success "WeChat${index}.app 创建成功 (显示名: $display_name)"
     
     # 显示数据关联状态
     if [ -d "$data_path" ]; then
@@ -466,7 +616,9 @@ create_all_clones() {
     local fail_count=0
     
     for i in $(seq 2 $TOTAL_COUNT); do
-        if create_wechat_clone $i; then
+        local idx=$((i-2))
+        local dname="${CLONE_DISPLAY_NAMES[$idx]:-WeChat${i}}"
+        if create_wechat_clone "$i" "$dname"; then
             success_count=$((success_count + 1))
         else
             fail_count=$((fail_count + 1))
@@ -587,17 +739,19 @@ show_data_info() {
     
     local has_data=false
     for i in $(seq 2 $TOTAL_COUNT); do
+        local idx=$((i-2))
+        local dname="${CLONE_DISPLAY_NAMES[$idx]:-WeChat${i}}"
         local data_path="${DATA_BASE_PATH}/${BASE_BUNDLE_ID}${i}"
         if [ -d "$data_path" ]; then
             has_data=true
             local size=$(du -sh "$data_path" 2>/dev/null | cut -f1 || echo "未知")
-            echo "  $((i-1)). WeChat${i}.app"
+            echo "  $((i-1)). WeChat${i}.app (显示名: $dname)"
             echo "     Bundle ID: ${BASE_BUNDLE_ID}${i}"
             echo "     数据路径: ~/Library/Containers/${BASE_BUNDLE_ID}${i}/"
             echo "     数据大小: $size"
             echo ""
         else
-            echo "  $((i-1)). WeChat${i}.app"
+            echo "  $((i-1)). WeChat${i}.app (显示名: $dname)"
             echo "     Bundle ID: ${BASE_BUNDLE_ID}${i}"
             echo "     数据路径: ~/Library/Containers/${BASE_BUNDLE_ID}${i}/"
             echo "     数据大小: 尚未创建（首次登录后生成）"
@@ -622,9 +776,11 @@ show_summary() {
     
     local count=0
     for i in $(seq 2 $TOTAL_COUNT); do
+        local idx=$((i-2))
+        local dname="${CLONE_DISPLAY_NAMES[$idx]:-WeChat${i}}"
         local wechat_clone="/Applications/WeChat${i}.app"
         if [ -d "$wechat_clone" ]; then
-            echo "  ✓ WeChat${i}.app"
+            echo "  ✓ WeChat${i}.app (显示名: $dname)"
             count=$((count + 1))
         fi
     done
